@@ -7,19 +7,11 @@ on:
       model:
         required: true
         description: Device Model
-        type: choice
         default: wax206
-        options:
-          - wax206
-          - RedMi-AX6_plus_libwrt
       runs-on:
         required: true
         description: Runs on...
-        type: choice
         default: ubuntu-22.04
-        options:
-          - ubuntu-20.04
-          - ubuntu-22.04
 
   schedule:
     - cron: 43 3 * * 4
