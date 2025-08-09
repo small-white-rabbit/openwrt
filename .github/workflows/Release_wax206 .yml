@@ -59,8 +59,6 @@ jobs:
           export BUILD_SRC=$(awk -F"=" '/REPO_URL/ {print $NF}' "./compilecfg/${{ inputs.model || 'wax206'}}.ini")
           echo "BUILD_SRC=$BUILD_SRC" >> $GITHUB_ENV
 
-      - name: 克隆固件代码
-        run: chmod +x ./sh/pre_clone_action.sh ${{ inputs.model || 'wax206'}}
 
       - name: 调试 feeds 和配置
         run: |
