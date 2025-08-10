@@ -101,21 +101,10 @@ jobs:
           fi
 
       - name: 更新 feeds
-        run: |
-          # 强制使用 openwrt-23.05 分支（包含 GCC 13.3.0）
-          sed -i 's|src-git packages.*|src-git packages https://git.openwrt.org/feed/packages.git;openwrt-23.05|' ./feeds.conf.default || true
-          # 移除重复的 openclash feed
-          sed -i '/src-git openclash/d' ./feeds.conf.default
-          echo "src-git openclash https://github.com/vernesong/OpenClash.git" >> ./feeds.conf.default
-          # 检查重复 feed 名称
-          if awk '{print $2}' ./feeds.conf.default | sort | uniq -d | grep -q .; then
-            echo "错误：检测到重复 feed 名称"
-            awk '{print $2}' ./feeds.conf.default | sort | uniq -d
-            exit 1
-          fi
+        run: 
           ./scripts/feeds update -a
-          ./scripts/feeds install -a -p packages -f "$CONFIG_FILE"
-          ./scripts/feeds install -p openclash
+          ./scripts/feeds install -a 
+ 
 
       - name: 修复 Rust 编译和 GCC 版本
         run: |
