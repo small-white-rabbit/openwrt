@@ -95,129 +95,21 @@ jobs:
             done
           fi
 
-      - name: 准备构建
-        run: |
-          # 定义变量（从 update.sh）
-          export FEEDS_CONF="feeds.conf.default"
-          export GOLANG_REPO="https://github.com/sbwml/packages_lang_golang"
-          export GOLANG_BRANCH="24.x"
-          export THEME_SET="argon"
-          export LAN_ADDR="192.168.123.1"
-          # 清理（clean_up）
-          if [[ -f ./.config ]]; then
-            rm -f ./.config
-          fi
-          if [[ -d ./tmp ]]; then
-            rm -rf ./tmp
-          fi
-          if [[ -d ./logs ]]; then
-            rm -rf ./logs/*
-          fi
-          mkdir -p ./tmp
-          echo "1" > ./tmp/.build
-          # 重置 feeds.conf（reset_feeds_conf）
-          git reset --hard HEAD
-          git clean -f -d
-          git pull
-          # 更新 feeds（update_feeds）
-          sed -i '/^#/d' "$FEEDS_CONF"
-          if ! grep -q "fichenx/openwrt-package" "$FEEDS_CONF"; then
-            [ -z "$(tail -c 1 "$FEEDS_CONF")" ] || echo "" >>"$FEEDS_CONF"
-            echo "src-git fichenx https://github.com/fichenx/openwrt-package;js" >>"$FEEDS_CONF"
-          fi
-          if [ ! -f "./include/bpf.mk" ]; then
-            touch "./include/bpf.mk"
-          fi
-          ./scripts/feeds clean
-          ./scripts/feeds update -a
-          # 移除不需要的包（remove_unwanted_packages）
-          luci_packages=("luci-app-passwall" "luci-app-smartdns" "luci-app-ddns-go" "luci-app-rclone" "luci-app-ssr-plus" "luci-app-vssr" "luci-theme-argon" "luci-app-daed" "luci-app-dae" "luci-app-alist" "luci-app-argon-config" "luci-app-homeproxy" "luci-app-haproxy-tcp" "luci-app-openclash" "luci-app-mihomo" "luci-app-appfilter" "luci-app-msd_lite")
-          packages_net=("haproxy" "xray-core" "xray-plugin" "dns2socks" "alist" "hysteria" "smartdns" "mosdns" "adguardhome" "ddns-go" "naiveproxy" "shadowsocks-rust" "sing-box" "v2ray-core" "v2ray-geodata" "v2ray-plugin" "tuic-client" "chinadns-ng" "ipt2socks" "tcping" "trojan-plus" "simple-obfs" "shadowsocksr-libev" "dae" "daed" "mihomo" "geoview" "tailscale" "open-app-filter" "msd_lite")
-          packages_utils=("cups")
-          fichenx_package=("ppp" "firewall" "dae" "daed" "daed-next" "libnftnl" "nftables" "dnsmasq")
-          for pkg in "${luci_packages[@]}"; do
-            rm -rf ./feeds/luci/applications/$pkg 2>/dev/null
-            rm -rf ./feeds/luci/themes/$pkg 2>/dev/null
-          done
-          for pkg in "${packages_net[@]}"; do
-            rm -rf ./feeds/packages/net/$pkg 2>/dev/null
-          done
-          for pkg in "${packages_utils[@]}"; do
-            rm -rf ./feeds/packages/utils/$pkg 2>/dev/null
-          done
-          for pkg in "${fichenx_package[@]}"; do
-            rm -rf ./feeds/fichenx/$pkg 2>/dev/null
-          done
-          rm -rf ./package/istore 2>/dev/null
-          # 更新 golang（update_golang）
-          if [[ -d ./feeds/packages/lang/golang ]]; then
-            rm -rf ./feeds/packages/lang/golang
-            git clone --depth 1 $GOLANG_REPO -b $GOLANG_BRANCH ./feeds/packages/lang/golang
-          fi
-          # 安装 feeds（install_feeds 和 install_fichenx）
-          ./scripts/feeds update -i
-          for dir in ./feeds/*; do
-            if [ -d "$dir" ] && [[ ! "$dir" == *.tmp ]] && [ ! -L "$dir" ]; then
-              if [[ $(basename "$dir") == "fichenx" ]]; then
-                ./scripts/feeds install -p fichenx -f xray-core xray-plugin dns2tcp dns2socks haproxy hysteria naiveproxy shadowsocks-rust sing-box v2ray-core v2ray-geodata v2ray-geoview v2ray-plugin tuic-client chinadns-ng ipt2socks tcping trojan-plus simple-obfs shadowsocksr-libev luci-app-passwall alist luci-app-alist smartdns luci-app-smartdns v2dat mosdns luci-app-mosdns adguardhome luci-app-adguardhome ddns-go luci-app-ddns-go taskd luci-lib-xterm luci-lib-taskd luci-app-store quickstart luci-app-quickstart luci-app-istorex luci-app-cloudflarespeedtest luci-theme-argon netdata luci-app-netdata lucky luci-app-lucky luci-app-openclash luci-app-homeproxy luci-app-amlogic nikki luci-app-nikki tailscale luci-app-tailscale oaf open-app-filter luci-app-oaf easytier luci-app-easytier msd_lite luci-app-msd_lite cups luci-app-cupsd luci-app-argon-config luci-theme-design luci-app-design-config luci-app-watchcat-plus luci-app-wol
-              else
-                ./scripts/feeds install -f -ap $(basename "$dir")
-              fi
-            fi
-          done
-          # 修改默认主题（fix_default_set，移除 patches 依赖）
-          if [ -d "./feeds/luci/collections/" ]; then
-            find "./feeds/luci/collections/" -type f -name "Makefile" -exec sed -i "s/luci-theme-bootstrap/luci-theme-$THEME_SET/g" {} \;
-          fi
-          # 替换 dnsmasq 为 dnsmasq-full（change_dnsmasq2full）
-          if ! grep -q "dnsmasq-full" ./include/target.mk; then
-            sed -i 's/dnsmasq/dnsmasq-full/g' ./include/target.mk
-          fi
-          # 修复依赖（fix_mk_def_depends）
-          sed -i 's/libustream-mbedtls/libustream-openssl/g' ./include/target.mk 2>/dev/null
-          if [ -f ./target/linux/qualcommax/Makefile ]; then
-            sed -i 's/wpad-basic-mbedtls/wpad-openssl/g' ./target/linux/qualcommax/Makefile
-          fi
-          # 更新 LAN 地址（update_default_lan_addr）
-          CFG_PATH="./package/base-files/files/bin/config_generate"
-          if [ -f $CFG_PATH ]; then
-            sed -i 's/192\.168\.[0-9]*\.[0-9]*/'$LAN_ADDR'/g' $CFG_PATH
-          fi
-          # 添加 luci-app-timecontrol（add_timecontrol）
-          timecontrol_dir="./package/luci-app-timecontrol"
-          rm -rf "$timecontrol_dir" 2>/dev/null
-          git clone --depth 1 https://github.com/sirpdboy/luci-app-timecontrol.git "$timecontrol_dir"
-          # 添加 openwrt-gecoosac（add_gecoosac）
-          gecoosac_dir="./package/openwrt-gecoosac"
-          rm -rf "$gecoosac_dir" 2>/dev/null
-          git clone --depth 1 https://github.com/lwb1978/openwrt-gecoosac.git "$gecoosac_dir"
-
       - name: 构建固件
         run: |
           export BASE_PATH=$(pwd)
           cp -f "$CONFIG_FILE" "./.config"
           make defconfig
-          if grep -qE "^CONFIG_TARGET_x86_64=y" "$CONFIG_FILE"; then
-            DISTFEEDS_PATH="./package/emortal/default-settings/files/99-distfeeds.conf"
-            if [ -d "${DISTFEEDS_PATH%/*}" ] && [ -f "$DISTFEEDS_PATH" ]; then
-              sed -i 's/aarch64_cortex-a53/x86_64/g' "$DISTFEEDS_PATH"
-            fi
-          fi
-          TARGET_DIR="./bin/targets"
-          if [[ -d $TARGET_DIR ]]; then
-            find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.manifest" -o -name "*efi.img.gz" -o -name "*.itb" -o -name "*.fip" -o -name "*.ubi" -o -name "*.tar.gz" \) -exec rm -f {} +
-          fi
           make download -j$(($(nproc) * 2))
-          make -j$(($(nproc) + 1)) || make -j1 V=s
+          make V=s -j$(nproc)
+          FIRMWARE_DIR="./firmware"
+          rm -rf "$FIRMWARE_DIR"
+          mkdir -p "$FIRMWARE_DIR"
+          find "./bin/targets" -type f \( -name "*.bin" -o -name "*.manifest" -o -name "*efi.img.gz" -o -name "*.itb" -o -name "*.fip" -o -name "*.ubi" -o -name "*.tar.gz" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
           cd ./bin/packages
           tar -zcvf Packages.tar.gz ./*
           cp Packages.tar.gz ../targets/
           cd "$BASE_PATH"
-          FIRMWARE_DIR="./firmware"
-          rm -rf "$FIRMWARE_DIR"
-          mkdir -p "$FIRMWARE_DIR"
-          find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.manifest" -o -name "*efi.img.gz" -o -name "*.itb" -o -name "*.fip" -o -name "*.ubi" -o -name "*.tar.gz" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
-          rm -f "./firmware/Packages.manifest" 2>/dev/null
           make clean
 
       - name: 获取内核版本
