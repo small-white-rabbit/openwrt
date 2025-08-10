@@ -99,12 +99,14 @@ jobs:
           else
             echo "工具链目录未找到"
           fi
+          # 检查隐藏字符
+          dos2unix ./feeds.conf.default
+          dos2unix "$CONFIG_FILE"
 
       - name: 更新 feeds
         run: 
           ./scripts/feeds update -a
           ./scripts/feeds install -a 
- 
 
       - name: 修复 Rust 编译和 GCC 版本
         run: |
@@ -145,5 +147,98 @@ jobs:
 
       - name: 刷新缓存
         run: |
-          if [ -d "./staging_dir" ]; then
-            find "./staging_dir" -type d -name "stamp" -not -path "*target
+          if [ -d ./staging_dir ]; then
+            find ./staging_dir -type d -name stamp -not -path '*target*' -exec find {} -type f -exec touch {} + \;
+          fi
+
+      - name: 构建固件
+        run: |
+          export BASE_PATH=$(pwd)
+          cp -f "${CONFIG_FILE}" ./.config
+          make defconfig
+          make download -j$(($(nproc) * 2))
+          make V=s -j$(nproc) || make -j1 V=s
+          FIRMWARE_DIR="./firmware"
+          rm -rf "$FIRMWARE_DIR"
+          mkdir -p "$FIRMWARE_DIR"
+          find "./bin/targets" -type f \( -name "*.bin" -o -name "*.manifest" -o -name "*efi.img.gz" -o -name "*.itb" -o -name "*.fip" -o -name "*.ubi" -o -name "*.tar.gz" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
+          cd ./bin/packages
+          tar -zcvf Packages.tar.gz ./*
+          cp Packages.tar.gz ../targets/
+          cd "$BASE_PATH"
+          make clean
+          echo "======================="
+          echo "Space usage:"
+          echo "======================="
+          df -h
+          du -h --max-depth=1 ./ --exclude=build_dir --exclude=bin
+          du -h --max-depth=1 ./build_dir
+          du -h --max-depth=1 ./bin
+
+      - name: 获取内核版本
+        run: |
+          echo "KVER=$(find ./dl -maxdepth 1 -name "linux-[4-6]\.*" | sort -r | head -n 1 | grep -oE "[4-6]\.[0-9]{1,3}\.[0-9]{1,3}")" >> $GITHUB_ENV
+          useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H")
+          echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
+
+      - name: 删除旧缓存
+        run: |
+          gh cache list --key ${{ inputs.runs-on || 'ubuntu-22.04'}}- --json key --jq '.[] | .key' | while read -r key; do
+            gh cache delete "$key"
+          done
+          echo "======== 缓存状态 ========"
+          echo "ccache: $(du -sh ./.ccache | cut -f 1)"
+          echo "staging: $(du -sh ./staging_dir | cut -f 1)"
+
+      - name: 输出虚拟机信息
+        run: |
+          echo "=============================================="
+          lscpu | grep -E "name|Core|Thread"
+          echo "=============================================="
+          df -h
+          echo "=============================================="
+
+      - name: 准备发布简介
+        run: |
+          echo "云编译发布" > release_body.txt
+          echo "源码：${{ github.repository }}" >> release_body.txt
+          echo "Kernel: ${{ env.KVER }}" >> release_body.txt
+          echo "WIFI密码: 12345678" >> release_body.txt
+          echo "LAN地址: 192.168.31.1" >> release_body.txt
+          echo "源码最近提交信息:" >> release_body.txt
+          echo "${{ env.useVersionInfo }}" >> release_body.txt
+          echo "插件：" >> release_body.txt
+          echo "$(grep -oP "luci-app(-[a-zA-Z0-9]{1,}){1,}" ./firmware/*.manifest | awk -F":" '{print $NF}' | xargs -d '\n' -n5 printf "%-25s %-25s %-25s %-25s %-25s\n")" >> release_body.txt
+
+      - name: 删除不需要的固件文件
+        run: |
+          rm -f ./firmware/mt7622-ram-1ddr-bl2.bin
+          rm -f ./firmware/mt7622-ram-2ddr-bl2.bin
+          rm -f ./firmware/openwrt-mediatek-mt7622-netgear_wax206.manifest
+          rm -f ./firmware/openwrt-mediatek-mt7622-netgear_wax206-initramfs-recovery.itb
+
+      - name: 发布固件
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.BUILD_DATE }}_${{ inputs.model || 'wax206'}}
+          files: ./firmware/*.*
+          body_path: ./release_body.txt
+
+      - name: 删除旧的工作流和固件
+        uses: Mattraks/delete-workflow-runs@main
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          delete_workflow_pattern: Release_Redmi-AX6 plus（imm）
+          retain_days: 20
+          keep_minimum_runs: 5
+
+      - name: 删除旧的发布版本
+        uses: codesnas/delete-older-releases@main
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+        with:
+          keep_latest: 5
+          delete_tag_pattern: ${{ inputs.model || 'wax206'}}
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
