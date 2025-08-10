@@ -1,4 +1,4 @@
-name: TEST---Release_wax206
+name: Release_wax206
 run-name: Release - ${{ inputs.model || 'wax206'}}
 
 on:
@@ -28,14 +28,12 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          # 借鉴 KFERMercer 的清理逻辑
           docker rmi `docker images -q`
           sudo -E rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d /usr/local/lib/android
           sudo -E apt-mark hold grub-efi-amd64-signed
           sudo -E apt update
           sudo -E apt -y purge azure-cli* docker* ghc* zulu* llvm* firefox google* dotnet* powershell* openjdk* mysql* php* mongodb* dotnet* snap*
           sudo -E apt -y full-upgrade
-          # 使用 AdityaGarg8 的清理工具
           sudo -E bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
           sudo -E apt -y install dos2unix libfuse-dev clang ninja-build
           sudo -E apt -y autoremove --purge
@@ -54,6 +52,10 @@ jobs:
 
       - name: 检出代码
         uses: actions/checkout@v4
+
+      - name: 清理旧缓存
+        run: |
+          rm -rf ./.ccache ./staging_dir
 
       - name: 初始化值
         run: |
@@ -77,6 +79,13 @@ jobs:
           cat ./feeds.conf || echo "feeds.conf 未找到"
           echo "===== 检查 feeds.conf.default ====="
           cat ./feeds.conf.default || echo "feeds.conf.default 未找到"
+          echo "===== 检查重复 feed 名称 ====="
+          awk '{print $2}' ./feeds.conf.default | sort | uniq -d || echo "无重复 feed 名称"
+          if awk '{print $2}' ./feeds.conf.default | sort | uniq -d | grep -q .; then
+            echo "错误：检测到重复 feed 名称"
+            awk '{print $2}' ./feeds.conf.default | sort | uniq -d
+            exit 1
+          fi
           echo "===== 检查 config/${MODEL}.config ====="
           cat "$CONFIG_FILE" || echo "配置文件 ${CONFIG_FILE} 未找到"
           echo "===== 检查 Rust 包 Makefile ====="
@@ -85,20 +94,29 @@ jobs:
           grep "CONFIG_PACKAGE_" "$CONFIG_FILE" | grep "=y" || echo "未找到启用的软件包"
           echo "===== 检查 OpenClash 配置 ====="
           grep "CONFIG_PACKAGE_luci-app-openclash" "$CONFIG_FILE" || echo "OpenClash 未配置"
+          echo "===== 检查 GCC 和 Binutils 配置 ====="
+          grep "CONFIG_GCC_VERSION" "$CONFIG_FILE" || echo "GCC 版本未配置"
+          grep "CONFIG_GCC_USE_DEFAULT_VERSION" "$CONFIG_FILE" || echo "GCC 默认版本未配置"
+          grep "CONFIG_BINUTILS_VERSION" "$CONFIG_FILE" || echo "Binutils 版本未配置"
+          echo "===== 检查工具链 GCC 版本 ====="
+          if [ -d "./staging_dir/toolchain-"* ]; then
+            ./staging_dir/toolchain-*/bin/gcc --version || echo "GCC 未找到"
+          else
+            echo "工具链目录未找到"
+          fi
+          # 检查隐藏字符
+          dos2unix ./feeds.conf.default
+          dos2unix "$CONFIG_FILE"
 
       - name: 更新 feeds
         run: |
-          # 启用 helloworld feed（若需要 OpenClash）
-          sed -i 's/#src-git helloworld/src-git helloworld/g' ./feeds.conf.default || true
           ./scripts/feeds update -a
-          # 只安装配置文件中启用的包
-          ./scripts/feeds install -a -p packages -f "$CONFIG_FILE"
+          ./scripts/feeds install -a
 
-      - name: 修复 Rust 编译
+      - name: 修复 Rust 编译和 GCC 版本
         run: |
-          # 设置 RUSTFLAGS 修复 llvm.download-ci-llvm 错误
+          # 修复 Rust 编译
           echo "RUSTFLAGS=--cfg=llvm.download-ci-llvm=\"if-unchanged\"" >> $GITHUB_ENV
-          # 修改 Rust Makefile
           if [ -f "./feeds/packages/lang/rust/Makefile" ]; then
             sed -i 's/llvm\.download-ci-llvm = true/llvm.download-ci-llvm = if-unchanged/g' ./feeds/packages/lang/rust/Makefile
           fi
@@ -107,6 +125,19 @@ jobs:
             echo "CONFIG_PACKAGE_rust=n" >> "$CONFIG_FILE"
             echo "CONFIG_PACKAGE_mosdns=n" >> "$CONFIG_FILE"
             echo "CONFIG_PACKAGE_sing-box=n" >> "$CONFIG_FILE"
+            # 强制 GCC 和 Binutils 版本
+            echo "CONFIG_GCC_VERSION=\"13.3.0\"" >> "$CONFIG_FILE"
+            echo "CONFIG_GCC_USE_DEFAULT_VERSION=n" >> "$CONFIG_FILE"
+            echo "CONFIG_TOOLCHAINOPTS=y" >> "$CONFIG_FILE"
+            echo "CONFIG_BINUTILS_VERSION_2_42=y" >> "$CONFIG_FILE"
+            echo "CONFIG_BINUTILS_VERSION=\"2.42\"" >> "$CONFIG_FILE"
+          fi
+          # 强制工具链版本
+          if [ -f "./toolchain/gcc/Makefile" ]; then
+            sed -i 's/GCC_VERSION:=.*/GCC_VERSION:=13.3.0/g' ./toolchain/gcc/Makefile
+          fi
+          if [ -f "./toolchain/binutils/Makefile" ]; then
+            sed -i 's/BINUTILS_VERSION:=.*/BINUTILS_VERSION:=2.42/g' ./toolchain/binutils/Makefile
           fi
 
       - name: 缓存依赖
@@ -121,10 +152,8 @@ jobs:
 
       - name: 刷新缓存
         run: |
-          if [ -d "./staging_dir" ]; then
-            find "./staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r dir; do
-                find "$dir" -type f -exec touch {} +
-            done
+          if [ -d ./staging_dir ]; then
+            find ./staging_dir -type f -path '*/stamp/*' -not -path '*target*' -exec touch {} + \;
           fi
 
       - name: 构建固件
@@ -143,7 +172,6 @@ jobs:
           cp Packages.tar.gz ../targets/
           cd "$BASE_PATH"
           make clean
-          # 借鉴 KFERMercer 的磁盘使用输出
           echo "======================="
           echo "Space usage:"
           echo "======================="
