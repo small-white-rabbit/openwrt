@@ -83,9 +83,9 @@ jobs:
           path: |
             ./.ccache
             ./staging_dir
-          key: ${{ inputs.runs-on || 'ubuntu-22.04'}}-${{ hashFiles('**/repo_flag') }}-${{ env.BUILD_DATE }}
+          key: ${{ inputs.runs-on || 'ubuntu-22.04'}}-${{ env.BUILD_DATE }}
           restore-keys: |
-            ${{ inputs.runs-on || 'ubuntu-22.04'}}-${{ hashFiles('**/repo_flag') }}-
+            ${{ inputs.runs-on || 'ubuntu-22.04'}}-
 
       - name: 刷新缓存
         run: |
@@ -165,23 +165,9 @@ jobs:
               fi
             fi
           done
-          # 修改默认主题（fix_default_set）
+          # 修改默认主题（fix_default_set，移除 patches 依赖）
           if [ -d "./feeds/luci/collections/" ]; then
             find "./feeds/luci/collections/" -type f -name "Makefile" -exec sed -i "s/luci-theme-bootstrap/luci-theme-$THEME_SET/g" {} \;
-          fi
-          if [ -d "./feeds/fichenx/luci-theme-argon" ]; then
-            find "./feeds/fichenx/luci-theme-argon" -type f -name "cascade*" -exec sed -i 's/--bar-bg/--primary/g' {} \;
-          fi
-          install -Dm755 "./patches/990_set.argon_primary" "./package/base-files/files/etc/uci-defaults/990_set.argon_primary"
-          install -Dm755 "./patches/991_custom_settings" "./package/base-files/files/etc/uci-defaults/991_custom_settings"
-          if [ -f "./package/emortal/autocore/files/tempinfo" ] && [ -f "./patches/tempinfo" ]; then
-            cp -f "./patches/tempinfo" "./package/emortal/autocore/files/tempinfo"
-          fi
-          # 修复 miniupnpd（fix_miniupnpd）
-          miniupnpd_dir="./feeds/packages/net/miniupnpd"
-          patch_file="999-chanage-default-leaseduration.patch"
-          if [ -d "$miniupnpd_dir" ] && [ -f "./patches/$patch_file" ]; then
-            install -Dm644 "./patches/$patch_file" "$miniupnpd_dir/patches/$patch_file"
           fi
           # 替换 dnsmasq 为 dnsmasq-full（change_dnsmasq2full）
           if ! grep -q "dnsmasq-full" ./include/target.mk; then
@@ -191,15 +177,6 @@ jobs:
           sed -i 's/libustream-mbedtls/libustream-openssl/g' ./include/target.mk 2>/dev/null
           if [ -f ./target/linux/qualcommax/Makefile ]; then
             sed -i 's/wpad-basic-mbedtls/wpad-openssl/g' ./target/linux/qualcommax/Makefile
-          fi
-          # 添加 WiFi 默认设置（add_wifi_default_set）
-          qualcommax_uci_dir="./target/linux/qualcommax/base-files/etc/uci-defaults"
-          filogic_uci_dir="./target/linux/mediatek/filogic/base-files/etc/uci-defaults"
-          if [ -d "$qualcommax_uci_dir" ]; then
-            install -Dm755 "./patches/992_set-wifi-uci.sh" "$qualcommax_uci_dir/992_set-wifi-uci.sh"
-          fi
-          if [ -d "$filogic_uci_dir" ]; then
-            install -Dm755 "./patches/992_set-wifi-uci.sh" "$filogic_uci_dir/992_set-wifi-uci.sh"
           fi
           # 更新 LAN 地址（update_default_lan_addr）
           CFG_PATH="./package/base-files/files/bin/config_generate"
@@ -251,7 +228,7 @@ jobs:
 
       - name: 删除旧缓存
         run: |
-          gh cache list --key ${{ inputs.runs-on || 'ubuntu-22.04'}}-${{ hashFiles('**/repo_flag') }}- --json key --jq '.[] | .key' | while read -r key; do
+          gh cache list --key ${{ inputs.runs-on || 'ubuntu-22.04'}}- --json key --jq '.[] | .key' | while read -r key; do
             gh cache delete "$key"
           done
           echo "========cache status========"
