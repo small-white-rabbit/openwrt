@@ -147,10 +147,12 @@ jobs:
 
       - name: 刷新缓存
         run: |
-          if [ -d ./staging_dir ]; then
-            find ./staging_dir -type d -name stamp -not -path '*target*' -exec find {} -type f -exec touch {} + \;
+          if [ -d "./action_build/staging_dir" ]; then
+            find "./action_build/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r dir; do
+                find "$dir" -type f -exec touch {} +
+            done
           fi
-
+          
       - name: 构建固件
         run: |
           export BASE_PATH=$(pwd)
