@@ -73,22 +73,33 @@ jobs:
           cat ./feeds.conf || echo "feeds.conf 未找到"
           echo "===== 检查 feeds.conf.default ====="
           cat ./feeds.conf.default || echo "feeds.conf.default 未找到"
-          echo "===== 检查 .config ====="
-          cat ./.config || echo ".config 未找到"
           echo "===== 检查 config/${MODEL}.config ====="
           cat "$CONFIG_FILE" || echo "配置文件 ${CONFIG_FILE} 未找到"
           echo "===== 检查 Rust 包 Makefile ====="
           cat ./feeds/packages/lang/rust/Makefile || echo "Rust Makefile 未找到"
+          echo "===== 检查启用的软件包 ====="
+          grep "CONFIG_PACKAGE_" "$CONFIG_FILE" | grep "=y" || echo "未找到启用的软件包"
 
       - name: 更新 feeds
         run: |
           ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          # 只安装配置文件中启用的包
+          ./scripts/feeds install -a -p packages -f "$CONFIG_FILE"
 
       - name: 修复 Rust 编译
         run: |
           # 设置 RUSTFLAGS 修复 llvm.download-ci-llvm 错误
           echo "RUSTFLAGS=--cfg=llvm.download-ci-llvm=\"if-unchanged\"" >> $GITHUB_ENV
+          # 修改 Rust Makefile（如果存在）
+          if [ -f "./feeds/packages/lang/rust/Makefile" ]; then
+            sed -i 's/llvm\.download-ci-llvm = true/llvm.download-ci-llvm = if-unchanged/g' ./feeds/packages/lang/rust/Makefile
+          fi
+          # 防止 Rust 编译（如果不需要）
+          if ! grep -q "CONFIG_PACKAGE_rust=y" "$CONFIG_FILE" && ! grep -q "CONFIG_PACKAGE_mosdns=y" "$CONFIG_FILE" && ! grep -q "CONFIG_PACKAGE_sing-box=y" "$CONFIG_FILE"; then
+            echo "CONFIG_PACKAGE_rust=n" >> "$CONFIG_FILE"
+            echo "CONFIG_PACKAGE_mosdns=n" >> "$CONFIG_FILE"
+            echo "CONFIG_PACKAGE_sing-box=n" >> "$CONFIG_FILE"
+          fi
 
       - name: 缓存依赖
         uses: actions/cache@v4
