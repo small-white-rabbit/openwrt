@@ -196,17 +196,6 @@
 #define RTL931X_RMA_CTRL_1			(0x8804)
 #define RTL931X_RMA_CTRL_2			(0x8808)
 
-/* Advanced SMI control for clause 45 PHYs */
-#define RTL930X_SMI_MAC_TYPE_CTRL		(0xCA04)
-#define RTL930X_SMI_PORT24_27_ADDR_CTRL		(0xCB90)
-#define RTL930X_SMI_PORT0_15_POLLING_SEL	(0xCA08)
-#define RTL930X_SMI_PORT16_27_POLLING_SEL	(0xCA0C)
-
-#define RTL930X_SMI_10GPHY_POLLING_REG0_CFG	(0xCBB4)
-#define RTL930X_SMI_10GPHY_POLLING_REG9_CFG	(0xCBB8)
-#define RTL930X_SMI_10GPHY_POLLING_REG10_CFG	(0xCBBC)
-#define RTL930X_SMI_PRVTE_POLLING_CTRL		(0xCA10)
-
 /* Chip configuration registers of the RTL9310 */
 #define RTL931X_MEM_ENCAP_INIT			(0x4854)
 #define RTL931X_MEM_MIB_INIT			(0x7E18)
@@ -216,9 +205,6 @@
 #define RTL931X_MEM_ALE_INIT_2			(0x82E4)
 #define RTL931X_MDX_CTRL_RSVD			(0x0fcc)
 #define RTL931X_PS_SOC_CTRL			(0x13f8)
-#define RTL931X_SMI_10GPHY_POLLING_SEL2		(0xCF8)
-#define RTL931X_SMI_10GPHY_POLLING_SEL3		(0xCFC)
-#define RTL931X_SMI_10GPHY_POLLING_SEL4		(0xD00)
 
 /* shared CPU tag definitions for RTL930X/RTL931X */
 #define RTL93XX_CPU_TAG1_FWD_MASK		GENMASK(11, 8)
@@ -432,7 +418,7 @@ inline u32 rtl931x_get_mac_tx_pause_sts(int p)
 
 struct p_hdr;
 struct dsa_tag;
-struct rtl838x_eth_priv;
+struct rteth_ctrl;
 
 struct rteth_config {
 	int family_id;
@@ -464,10 +450,11 @@ struct rteth_config {
 	u32 (*get_mac_tx_pause_sts)(int port);
 	int mac;
 	int l2_tbl_flush_ctrl;
-	void (*update_cntr)(int r, int work_done);
 	void (*create_tx_header)(struct p_hdr *h, unsigned int dest_port, int prio);
 	bool (*decode_tag)(struct p_hdr *h, struct dsa_tag *tag);
-	int (*init_mac)(struct rtl838x_eth_priv *priv);
+	void (*hw_reset)(struct rteth_ctrl *ctrl);
+	int (*init_mac)(struct rteth_ctrl *ctrl);
+	void (*update_counter)(int r, int work_done);
 	const struct net_device_ops *netdev_ops;
 };
 
