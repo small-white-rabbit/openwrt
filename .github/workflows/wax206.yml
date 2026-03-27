@@ -1,4 +1,4 @@
-name: Build OpenWrt
+name: Build OpenWrt——wax206
 
 on:
   workflow_dispatch:
