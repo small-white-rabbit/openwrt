@@ -1,0 +1,140 @@
+name: Build OpenWrt
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: 'Device config file (without .config extension)'
+        required: true
+        default: 'wax206'
+      enable_sign:
+        description: 'Enable package signature check'
+        type: boolean
+        default: false
+
+  push:
+    paths:
+      - 'configs/**'
+      - '.github/workflows/**'
+
+env:
+  REPO_URL: https://github.com/small-white-rabbit/openwrt.git
+  REPO_BRANCH: main
+  CONFIG_FILE: configs/${{ github.event.inputs.device || 'wax206' }}.config
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Free disk space
+        uses: sbwml/actions@free-disk
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses5-dev \
+            libssl-dev python3-distutils python3-setuptools \
+            rsync swig unzip zlib1g-dev file wget qemu-utils \
+            cpio kmod libfuse-dev
+
+      - name: Checkout OpenWrt
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.REPO_URL }}
+          ref: ${{ env.REPO_BRANCH }}
+          path: openwrt
+
+      - name: Update & Install feeds
+        run: |
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Load custom config
+        run: |
+          cd openwrt
+          cp ${{ github.workspace }}/${{ env.CONFIG_FILE }} .config
+          
+          # 关键：确保APK签名配置正确
+          if grep -q "CONFIG_USE_APK=y" .config; then
+            echo "APK mode detected, configuring signature..."
+            
+            # 禁用严格签名检查（可选，用于第三方插件安装）
+            if [ "${{ github.event.inputs.enable_sign }}" != "true" ]; then
+              echo 'CONFIG_PACKAGE_apk-mbedtls=y' >> .config
+              echo '# CONFIG_PACKAGE_apk-openssl is not set' >> .config
+            fi
+          fi
+          
+          make defconfig
+
+      - name: Download packages
+        run: |
+          cd openwrt
+          make download -j$(nproc) || make download -j1 V=s
+
+      - name: Compile firmware
+        run: |
+          cd openwrt
+          make -j$(($(nproc) + 1)) || make -j1 V=s
+
+      - name: Collect firmware
+        run: |
+          mkdir -p ${{ github.workspace }}/firmware
+          cd openwrt/bin/targets
+          
+          # 收集所有固件文件
+          find . -type f \( \
+            -name "*.bin" -o \
+            -name "*.img" -o \
+            -name "*.img.gz" -o \
+            -name "*.itb" -o \
+            -name "*.ubi" -o \
+            -name "*.factory" -o \
+            -name "*.sysupgrade" -o \
+            -name "*.manifest" \
+          \) -exec cp {} ${{ github.workspace }}/firmware/ \;
+          
+          # 复制配置文件
+          cp ${{ github.workspace }}/openwrt/.config ${{ github.workspace }}/firmware/build.config
+          
+          echo "=== Generated files ==="
+          ls -la ${{ github.workspace }}/firmware/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenWrt-firmware
+          path: firmware/
+
+      - name: Create release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.device || 'wax206' }}-${{ github.run_number }}
+          name: OpenWrt for ${{ github.event.inputs.device || 'wax206' }}
+          files: firmware/*
+          body: |
+            Device: ${{ github.event.inputs.device || 'wax206' }}
+            Branch: ${{ env.REPO_BRANCH }}
+            Build Date: ${{ github.event.head_commit.timestamp }}
+            
+            ## APK Package Manager Notes
+            
+            This firmware uses **APK** package manager (OpenWrt 24.10+).
+            
+            To install third-party packages:
+            ```bash
+            # Method 1: Allow untrusted (temporary)
+            apk add --allow-untrusted ./package.apk
+            
+            # Method 2: Add repository key (recommended)
+            wget -O /etc/apk/keys/repo-key.rsa.pub <key-url>
+            echo "https://your-repo.com/packages" >> /etc/apk/repositories
+            apk update && apk add package-name
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
